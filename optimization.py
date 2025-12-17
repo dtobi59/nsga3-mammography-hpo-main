@@ -268,8 +268,9 @@ def run_optimization(
         Dict with pareto_X, pareto_F, pareto_configs, history
     """
     from surrogate import MultiObjectiveGPSurrogate, SurrogateAssistedSelection
-    
-    np.random.seed(seed)
+    from training import set_seed
+
+    set_seed(seed)
     os.makedirs(output_dir, exist_ok=True)
     
     # Create encoder

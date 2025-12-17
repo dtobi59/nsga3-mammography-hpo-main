@@ -13,9 +13,26 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR, ReduceLROnPlatea
 from torch.utils.data import DataLoader
 from typing import Dict, Any, List, Optional
 import numpy as np
+import random
 from sklearn.metrics import roc_auc_score, confusion_matrix
 
 from dataset import mixup_data, mixup_criterion
+
+
+def set_seed(seed: int):
+    """
+    Set random seeds for reproducibility across numpy, torch, and python random.
+
+    Args:
+        seed: Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 class FocalLoss(nn.Module):
