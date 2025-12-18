@@ -104,7 +104,7 @@ class MammographyHPOProblem(Problem):
     """
     Multi-objective optimization problem for mammography CNN hyperparameters.
     
-    Objectives: sensitivity, specificity, AUC (maximize), model_size, inference_time (minimize)
+    Objectives: sensitivity, specificity, AUC (maximize), model_size (minimize)
     """
     
     def __init__(
@@ -112,14 +112,14 @@ class MammographyHPOProblem(Problem):
         hp_space: HyperparameterSpace,
         eval_function: Callable,
         surrogate_selector = None,
-        n_objectives: int = 5
+        n_objectives: int = 4
     ):
         self.encoder = HyperparameterEncoder(hp_space)
         self.eval_function = eval_function
         self.surrogate_selector = surrogate_selector
-        
+
         xl, xu = self.encoder.get_bounds()
-        
+
         super().__init__(
             n_var=self.encoder.n_vars,
             n_obj=n_objectives,
@@ -127,13 +127,13 @@ class MammographyHPOProblem(Problem):
             xl=xl,
             xu=xu
         )
-        
+
         self.eval_count = 0
         self.true_eval_count = 0
         self.surrogate_eval_count = 0
-        
+
         # Objectives to maximize (will negate for pymoo minimization)
-        self.maximize_mask = np.array([True, True, True, False, False])
+        self.maximize_mask = np.array([True, True, True, False])
     
     def _evaluate(self, X: np.ndarray, out: Dict, *args, **kwargs):
         """Evaluate population."""
@@ -195,8 +195,7 @@ class MammographyHPOProblem(Problem):
             results['sensitivity'],
             results['specificity'],
             results['auc'],
-            results['model_size'],
-            results['inference_time']
+            results['model_size']
         ])
 
 
@@ -282,7 +281,7 @@ def run_optimization(
         surrogate=surrogate,
         true_eval_ratio=1.0 - nsga_config.surrogate_ratio,
         min_samples=nsga_config.min_samples_for_surrogate,
-        objectives_maximize=[True, True, True, False, False]
+        objectives_maximize=[True, True, True, False]
     )
     
     # Create problem

@@ -52,8 +52,8 @@ class HyperparameterSpace:
 @dataclass
 class NSGAIIIConfig:
     """Configuration for NSGA-III algorithm."""
-    
-    n_objectives: int = 5
+
+    n_objectives: int = 4
     n_partitions: int = 4
     pop_size: int = 50
     n_generations: int = 30
@@ -89,6 +89,5 @@ OBJECTIVES = {
     "sensitivity": {"direction": "maximize", "index": 0},
     "specificity": {"direction": "maximize", "index": 1},
     "auc": {"direction": "maximize", "index": 2},
-    "model_size": {"direction": "minimize", "index": 3},
-    "inference_time": {"direction": "minimize", "index": 4}
+    "model_size": {"direction": "minimize", "index": 3}
 }

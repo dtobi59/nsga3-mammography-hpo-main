@@ -272,9 +272,9 @@ def full_evaluation(
 ) -> Dict:
     """
     Full evaluation pipeline: build model, train, evaluate.
-    Returns dict with sensitivity, specificity, auc, model_size, inference_time.
+    Returns dict with sensitivity, specificity, auc, model_size.
     """
-    from models import build_model, measure_inference_time, get_param_count
+    from models import build_model, get_param_count
     from dataset import create_dataloaders
     
     # Build model
@@ -305,15 +305,10 @@ def full_evaluation(
         model, train_loader, val_loader, config, train_labels,
         device=device, patience=10, verbose=verbose
     )
-    
-    # Measure inference time
-    model.eval()
-    inference_time = measure_inference_time(model, device=device, image_size=config.get('image_size', 224))
-    
+
     return {
         'sensitivity': metrics['sensitivity'],
         'specificity': metrics['specificity'],
         'auc': metrics['auc'],
-        'model_size': model_size,
-        'inference_time': inference_time
+        'model_size': model_size
     }
