@@ -466,12 +466,210 @@ def create_dataloaders(
     return train_loader, val_loader
 
 
+class KaggleVinDrPNGDataset:
+    """
+    Kaggle VinDr-Mammo PNG dataset handler.
+
+    Dataset: https://www.kaggle.com/datasets/shantanughosh/vindr-mammogram-dataset-dicom-to-png
+
+    Expected structure after download:
+    data_root/
+    ├── images/
+    │   └── *.png (or organized in subfolders)
+    └── vindr_detection_v1_folds.csv (or breast-level_annotations.csv)
+
+    The CSV should contain columns for image paths/IDs and labels (BI-RADS scores).
+    """
+
+    def __init__(self, data_root: str, csv_file: str = None):
+        """
+        Args:
+            data_root: Path to Kaggle dataset folder
+            csv_file: Optional path to CSV file (auto-detects if None)
+        """
+        self.data_root = Path(data_root)
+        self.df = None
+
+        # Auto-detect CSV file
+        if csv_file is None:
+            csv_candidates = [
+                self.data_root / "vindr_detection_v1_folds.csv",
+                self.data_root / "breast-level_annotations.csv",
+                self.data_root / "metadata.csv",
+            ]
+            for csv_path in csv_candidates:
+                if csv_path.exists():
+                    self.csv_path = csv_path
+                    break
+            else:
+                raise FileNotFoundError(
+                    f"No CSV file found in {self.data_root}. "
+                    f"Please specify csv_file parameter or ensure one of these exists: "
+                    f"{[c.name for c in csv_candidates]}"
+                )
+        else:
+            self.csv_path = Path(csv_file)
+            if not self.csv_path.exists():
+                raise FileNotFoundError(f"CSV not found: {self.csv_path}")
+
+        # Auto-detect image folder
+        self.images_dir = self.data_root / "images"
+        if not self.images_dir.exists():
+            # Images might be directly in data_root
+            self.images_dir = self.data_root
+
+        print(f"Kaggle VinDr-PNG: {self.data_root}")
+        print(f"  CSV: {self.csv_path.name}")
+        print(f"  Images dir: {self.images_dir}")
+
+    def load_and_process(self) -> pd.DataFrame:
+        """Load CSV and create binary labels."""
+        self.df = pd.read_csv(self.csv_path)
+        print(f"  Loaded {len(self.df)} rows from CSV")
+        print(f"  Columns: {list(self.df.columns)}")
+
+        # Auto-detect relevant columns
+        birads_col = self._find_column(['bi-rads', 'birads', 'breast_birads', 'finding_birads'])
+        image_col = self._find_column(['image_id', 'image', 'study_id', 'file', 'filename', 'image_file'])
+
+        if birads_col is None:
+            raise ValueError(
+                f"Could not find BI-RADS column. Available columns: {list(self.df.columns)}\n"
+                f"Please manually specify the BI-RADS column name."
+            )
+
+        if image_col is None:
+            raise ValueError(
+                f"Could not find image ID/path column. Available columns: {list(self.df.columns)}\n"
+                f"Please manually specify the image column name."
+            )
+
+        print(f"  Using BI-RADS column: '{birads_col}'")
+        print(f"  Using image column: '{image_col}'")
+
+        # Store column names for later use
+        self.birads_col = birads_col
+        self.image_col = image_col
+
+        # Extract BI-RADS scores
+        birads = self.df[birads_col].astype(str).str.extract(r'(\d+)', expand=False)
+        birads = pd.to_numeric(birads, errors='coerce')
+
+        # Show BI-RADS distribution
+        print(f"  BI-RADS distribution:")
+        for val in sorted(birads.dropna().unique()):
+            count = (birads == val).sum()
+            print(f"    BI-RADS {int(val)}: {count}")
+
+        # Filter: keep BI-RADS 1,2 (benign) and 4,5,6 (malignant), exclude 3 (uncertain)
+        mask = birads.isin([1, 2, 4, 5, 6])
+        self.df = self.df[mask].copy()
+        self.df['birads'] = birads[mask]
+        self.df['label'] = birads[mask].apply(lambda x: 0 if x <= 2 else 1)
+
+        print(f"  After filtering: {len(self.df)} samples")
+        print(f"    Benign (0): {(self.df['label']==0).sum()}")
+        print(f"    Malignant (1): {(self.df['label']==1).sum()}")
+
+        return self.df
+
+    def _find_column(self, keywords: List[str]) -> Optional[str]:
+        """Find column matching any of the keywords (case-insensitive)."""
+        df_cols_lower = {col.lower(): col for col in self.df.columns}
+        for keyword in keywords:
+            for col_lower, col_orig in df_cols_lower.items():
+                if keyword.lower() in col_lower:
+                    return col_orig
+        return None
+
+    def get_image_path(self, row) -> Optional[str]:
+        """Find the actual image file for a given row."""
+        image_id = str(row[self.image_col]).strip()
+
+        # Try different path patterns
+        path_candidates = []
+
+        # Pattern 1: Direct image_id.png
+        path_candidates.append(self.images_dir / f"{image_id}.png")
+
+        # Pattern 2: With subdirectory (study_id/image_id.png)
+        if 'study_id' in row:
+            study_id = str(row['study_id']).strip()
+            path_candidates.append(self.images_dir / study_id / f"{image_id}.png")
+
+        # Pattern 3: Already a path in the CSV
+        path_candidates.append(self.data_root / image_id)
+
+        # Pattern 4: Different extensions
+        for ext in ['.jpg', '.jpeg', '.dcm', '.dicom']:
+            path_candidates.append(self.images_dir / f"{image_id}{ext}")
+
+        # Return first existing path
+        for path in path_candidates:
+            if path.exists():
+                return str(path)
+
+        return None
+
+    def prepare_splits(self, val_split: float = 0.2, seed: int = 42, use_folds: bool = False):
+        """
+        Prepare train/val splits.
+
+        Args:
+            val_split: Validation split ratio (ignored if use_folds=True)
+            seed: Random seed
+            use_folds: If True and 'fold' column exists, use fold 0 for validation
+        """
+        if self.df is None:
+            self.load_and_process()
+
+        # Check if dataset has fold information
+        fold_col = self._find_column(['fold', 'split', 'fold_number'])
+
+        if use_folds and fold_col is not None:
+            print(f"  Using fold column: '{fold_col}' (fold 0 = validation)")
+            train_df = self.df[self.df[fold_col] != 0]
+            val_df = self.df[self.df[fold_col] == 0]
+        else:
+            # Manual split
+            train_df, val_df = train_test_split(
+                self.df,
+                test_size=val_split,
+                stratify=self.df['label'],
+                random_state=seed
+            )
+
+        # Get paths and labels
+        paths, labels = {'train': [], 'val': []}, {'train': [], 'val': []}
+
+        for split_name, split_df in [('train', train_df), ('val', val_df)]:
+            for _, row in tqdm(split_df.iterrows(), total=len(split_df), desc=f"Scanning {split_name}"):
+                path = self.get_image_path(row)
+                if path and os.path.exists(path):
+                    paths[split_name].append(path)
+                    labels[split_name].append(row['label'])
+
+        train_paths, train_labels = paths['train'], labels['train']
+        val_paths, val_labels = paths['val'], labels['val']
+
+        print(f"  Train: {len(train_paths)} (Benign: {train_labels.count(0)}, Malignant: {train_labels.count(1)})")
+        print(f"  Val: {len(val_paths)} (Benign: {val_labels.count(0)}, Malignant: {val_labels.count(1)})")
+
+        if len(train_paths) == 0 or len(val_paths) == 0:
+            raise ValueError(
+                f"No valid images found! Check that images exist in {self.images_dir}\n"
+                f"Expected image ID format from CSV column '{self.image_col}'"
+            )
+
+        return train_paths, train_labels, val_paths, val_labels
+
+
 def prepare_dataset(dataset_name: str, data_root: str, val_split: float = 0.2, seed: int = 42, downloaded_json: str = None):
     """
     Unified dataset preparation.
-    
+
     Args:
-        dataset_name: "vindr" or "inbreast"
+        dataset_name: "vindr", "inbreast", or "kaggle_vindr_png"
         data_root: Path to dataset folder
         val_split: Validation split ratio
         seed: Random seed
@@ -481,9 +679,11 @@ def prepare_dataset(dataset_name: str, data_root: str, val_split: float = 0.2, s
         ds = VinDrMammoDataset(data_root, downloaded_json=downloaded_json)
     elif dataset_name.lower() == "inbreast":
         ds = INbreastDataset(data_root)
+    elif dataset_name.lower() in ["kaggle_vindr_png", "kaggle_vindr", "vindr_png"]:
+        ds = KaggleVinDrPNGDataset(data_root)
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
-    
+
     return ds.prepare_splits(val_split, seed)
 
 

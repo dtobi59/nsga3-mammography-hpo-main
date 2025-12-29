@@ -20,6 +20,37 @@ pip install -r requirements.txt
 
 ## Quick Start (Google Colab)
 
+### Option 1: Using Kaggle Dataset (Recommended - Faster)
+
+```python
+# Clone and setup
+!git clone https://github.com/dtobi59/nsga3-mammography-hpo.git
+%cd nsga3-mammography-hpo
+!pip install -q -r requirements.txt
+
+# Mount Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Download Kaggle dataset (one-time setup)
+!pip install -q kaggle
+# Upload your kaggle.json to Colab, then:
+!mkdir -p ~/.kaggle
+!cp kaggle.json ~/.kaggle/
+!chmod 600 ~/.kaggle/kaggle.json
+!kaggle datasets download -d shantanughosh/vindr-mammogram-dataset-dicom-to-png
+!unzip -q vindr-mammogram-dataset-dicom-to-png.zip -d /content/drive/MyDrive/kaggle_vindr_data
+
+# Load dataset
+from dataset import prepare_dataset
+train_paths, train_labels, val_paths, val_labels = prepare_dataset(
+    dataset_name="kaggle_vindr_png",
+    data_root="/content/drive/MyDrive/kaggle_vindr_data"
+)
+```
+
+### Option 2: Using Original DICOM Dataset
+
 ```python
 # Clone and setup
 !git clone https://github.com/dtobi59/nsga3-mammography-hpo.git
@@ -73,7 +104,67 @@ for i, (cfg, obj) in enumerate(zip(results['pareto_configs'], results['pareto_F'
 
 ## Dataset Structure
 
-### VinDr-Mammo
+### VinDr-Mammo (Kaggle PNG Version) - **Recommended**
+**Dataset**: [Kaggle VinDr-Mammo PNG](https://www.kaggle.com/datasets/shantanughosh/vindr-mammogram-dataset-dicom-to-png)
+
+Download and setup:
+```bash
+# Install Kaggle CLI
+pip install kaggle
+
+# Download dataset (requires Kaggle API credentials)
+kaggle datasets download -d shantanughosh/vindr-mammogram-dataset-dicom-to-png
+
+# Unzip
+unzip vindr-mammogram-dataset-dicom-to-png.zip -d /path/to/kaggle_vindr_data
+```
+
+Structure:
+```
+kaggle_vindr_data/
+├── images/
+│   └── *.png (1520×912 pixels)
+└── vindr_detection_v1_folds.csv
+```
+
+Usage:
+```python
+from dataset import prepare_dataset
+
+train_paths, train_labels, val_paths, val_labels = prepare_dataset(
+    dataset_name="kaggle_vindr_png",
+    data_root="/path/to/kaggle_vindr_data"
+)
+```
+
+**Why use this?** PNG format loads 5-10x faster than DICOM, significantly reducing training time.
+
+## Testing Your Setup
+
+Before running full optimization, test your setup step-by-step:
+
+### Step 1: Setup Test (2 minutes)
+```bash
+python test_kaggle_setup.py
+```
+This checks dependencies, dataset structure, and basic functionality.
+
+### Step 2: Single Configuration Test (5-10 minutes)
+```bash
+python test_single_config.py --data_root /path/to/kaggle_vindr_data --epochs 2
+```
+Tests complete training pipeline with one configuration.
+
+### Step 3: Mini Optimization Test (30-60 minutes)
+```bash
+python test_mini_optimization.py --data_root /path/to/kaggle_vindr_data
+```
+Runs small-scale NSGA-III (6 population, 3 generations) to verify everything works.
+
+### Step 4: Full Optimization (hours to days)
+Edit `example_kaggle_dataset.py` with your paths and run full optimization.
+
+### VinDr-Mammo (Original DICOM)
 ```
 vindr-mammo/
 ├── images/
@@ -121,11 +212,12 @@ inbreast/
 ## Files
 
 - `config.py` - Configuration dataclasses
-- `dataset.py` - Data loading with DICOM support
+- `dataset.py` - Data loading with DICOM and PNG support
 - `models.py` - CNN architectures
 - `training.py` - Training and evaluation
 - `surrogate.py` - Gaussian Process surrogate
 - `optimization.py` - NSGA-III implementation
+- `example_kaggle_dataset.py` - Complete example using Kaggle dataset
 
 ## Citation
 
