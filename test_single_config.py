@@ -118,7 +118,7 @@ def main():
             print(f"        Malignant {cm[1][0]:4d}    {cm[1][1]:4d}")
 
         print("\n" + "="*70)
-        print("✓ TEST COMPLETED SUCCESSFULLY!")
+        print("[OK] TEST COMPLETED SUCCESSFULLY!")
         print("="*70)
 
         print("\nNext steps:")
@@ -129,7 +129,7 @@ def main():
 
     except Exception as e:
         print("\n" + "="*70)
-        print("✗ ERROR DURING TRAINING")
+        print("[X] ERROR DURING TRAINING")
         print("="*70)
         print(f"\nError: {e}")
         import traceback

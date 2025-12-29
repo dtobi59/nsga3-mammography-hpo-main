@@ -172,7 +172,7 @@ def main():
             print(f"\nCould not create visualization: {e}")
 
         print("\n" + "="*70)
-        print("✓ MINI OPTIMIZATION TEST PASSED!")
+        print("[OK] MINI OPTIMIZATION TEST PASSED!")
         print("="*70)
 
         print("\nNext steps:")
@@ -185,7 +185,7 @@ def main():
 
     except Exception as e:
         print("\n" + "="*70)
-        print("✗ ERROR DURING OPTIMIZATION")
+        print("[X] ERROR DURING OPTIMIZATION")
         print("="*70)
         print(f"\nError: {e}")
         import traceback
