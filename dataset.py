@@ -603,24 +603,40 @@ class KaggleVinDrPNGDataset:
         """Find the actual image file for a given row."""
         image_id = str(row[self.image_col]).strip()
 
+        # Remove extension if already present, we'll add it back
+        image_id_base = image_id
+        for ext in ['.png', '.jpg', '.jpeg', '.dcm', '.dicom']:
+            if image_id.lower().endswith(ext):
+                image_id_base = image_id[:-len(ext)]
+                break
+
         # Try different path patterns
         path_candidates = []
 
-        # Pattern 1: Direct image_id.png in images_dir
-        path_candidates.append(self.images_dir / f"{image_id}.png")
-
-        # Pattern 2: With subdirectory (study_id/image_id.png or patient_id/image_id.png)
-        for col in ['study_id', 'patient_id', 'StudyInstanceUID', 'PatientID']:
+        # Pattern 1: image_id already has extension (e.g., "abc123.png")
+        # Try with subdirectory first
+        for col in ['patient_id', 'study_id', 'series_id', 'StudyInstanceUID', 'PatientID']:
             if col in row:
                 subdir = str(row[col]).strip()
-                path_candidates.append(self.images_dir / subdir / f"{image_id}.png")
+                # Try with original image_id (may already have extension)
+                path_candidates.append(self.images_dir / subdir / image_id)
+                # Try adding .png if not present
+                if image_id_base != image_id:
+                    path_candidates.append(self.images_dir / subdir / image_id_base)
+
+        # Pattern 2: Direct image_id in images_dir
+        path_candidates.append(self.images_dir / image_id)
+        path_candidates.append(self.images_dir / f"{image_id_base}.png")
 
         # Pattern 3: Already a path in the CSV
         path_candidates.append(self.data_root / image_id)
 
-        # Pattern 4: Different extensions
-        for ext in ['.jpg', '.jpeg', '.dcm', '.dicom']:
-            path_candidates.append(self.images_dir / f"{image_id}{ext}")
+        # Pattern 4: Try different extensions with subdirectories
+        for col in ['patient_id', 'study_id', 'series_id', 'StudyInstanceUID', 'PatientID']:
+            if col in row:
+                subdir = str(row[col]).strip()
+                for ext in ['.png', '.jpg', '.jpeg', '.dcm', '.dicom']:
+                    path_candidates.append(self.images_dir / subdir / f"{image_id_base}{ext}")
 
         # Return first existing path
         for path in path_candidates:
@@ -628,10 +644,11 @@ class KaggleVinDrPNGDataset:
                 return str(path)
 
         # Pattern 5: Recursive search as fallback (slower but more robust)
-        # Search for image_id.png anywhere in images_dir subdirectories
-        search_results = list(self.images_dir.glob(f"**/{image_id}.png"))
-        if search_results:
-            return str(search_results[0])
+        # Try with original image_id first, then with .png added
+        for search_name in [image_id, f"{image_id_base}.png"]:
+            search_results = list(self.images_dir.glob(f"**/{search_name}"))
+            if search_results:
+                return str(search_results[0])
 
         return None
 
