@@ -232,16 +232,65 @@ class OptimizationCallback(Callback):
             self._save_checkpoint(algorithm, gen)
     
     def _save_checkpoint(self, algorithm, gen: int):
-        """Save checkpoint."""
+        """Save comprehensive checkpoint for resume capability."""
         path = self.checkpoint_dir / f"checkpoint_gen_{gen}.pkl"
+
+        # Get population data
+        pop_X = algorithm.pop.get("X")
+        pop_F = algorithm.pop.get("F")
+
+        # Save surrogate data if available
+        surrogate_data = None
+        if hasattr(algorithm.problem, 'surrogate_selector') and algorithm.problem.surrogate_selector:
+            selector = algorithm.problem.surrogate_selector
+            surrogate_data = {
+                'X_train': selector.surrogate.X_train,
+                'y_train': selector.surrogate.y_train,
+                'n_train_samples': selector.surrogate.n_train_samples
+            }
+
+        checkpoint = {
+            'generation': gen,
+            'history': self.history,
+            'eval_count': algorithm.problem.eval_count,
+            'true_eval_count': algorithm.problem.true_eval_count,
+            'surrogate_eval_count': algorithm.problem.surrogate_eval_count,
+            'population_X': pop_X,
+            'population_F': pop_F,
+            'surrogate_data': surrogate_data,
+            'algorithm_state': {
+                'n_gen': algorithm.n_gen,
+                'seed': algorithm.seed if hasattr(algorithm, 'seed') else None
+            }
+        }
+
         with open(path, 'wb') as f:
-            pickle.dump({
-                'generation': gen,
-                'history': self.history,
-                'eval_count': algorithm.problem.eval_count
-            }, f)
+            pickle.dump(checkpoint, f)
+
         if self.verbose:
             print(f"  Checkpoint saved: {path}")
+
+
+def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
+    """Find the most recent checkpoint file."""
+    checkpoint_path = Path(checkpoint_dir)
+    if not checkpoint_path.exists():
+        return None
+
+    checkpoints = list(checkpoint_path.glob("checkpoint_gen_*.pkl"))
+    if not checkpoints:
+        return None
+
+    # Sort by generation number
+    checkpoints.sort(key=lambda p: int(p.stem.split('_')[-1]))
+    return str(checkpoints[-1])
+
+
+def load_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
+    """Load a checkpoint file."""
+    with open(checkpoint_path, 'rb') as f:
+        checkpoint = pickle.load(f)
+    return checkpoint
 
 
 def run_optimization(
@@ -250,11 +299,12 @@ def run_optimization(
     eval_function: Callable,
     output_dir: str,
     seed: int = 42,
-    verbose: bool = True
+    verbose: bool = True,
+    resume_from: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Run NSGA-III optimization.
-    
+    Run NSGA-III optimization with optional resume capability.
+
     Args:
         hp_space: Search space
         nsga_config: Algorithm config
@@ -262,15 +312,48 @@ def run_optimization(
         output_dir: Where to save results
         seed: Random seed
         verbose: Print progress
-    
+        resume_from: Path to checkpoint file to resume from, or 'auto' to find latest
+
     Returns:
         Dict with pareto_X, pareto_F, pareto_configs, history
     """
     from surrogate import MultiObjectiveGPSurrogate, SurrogateAssistedSelection
     from training import set_seed
+    from pymoo.core.population import Population
 
     set_seed(seed)
     os.makedirs(output_dir, exist_ok=True)
+
+    # Handle resume
+    checkpoint = None
+    if resume_from:
+        if resume_from == 'auto':
+            checkpoint_path = find_latest_checkpoint(os.path.join(output_dir, 'checkpoints'))
+            if checkpoint_path:
+                checkpoint = load_checkpoint(checkpoint_path)
+                if verbose:
+                    print(f"\n{'='*70}")
+                    print(f"RESUMING FROM CHECKPOINT")
+                    print(f"{'='*70}")
+                    print(f"Checkpoint: {checkpoint_path}")
+                    print(f"Generation: {checkpoint['generation']}")
+                    print(f"Previous evals: {checkpoint['eval_count']} "
+                          f"(True={checkpoint['true_eval_count']}, "
+                          f"Surrogate={checkpoint['surrogate_eval_count']})")
+                    print(f"{'='*70}\n")
+            else:
+                if verbose:
+                    print("No checkpoint found, starting fresh...")
+        else:
+            if os.path.exists(resume_from):
+                checkpoint = load_checkpoint(resume_from)
+                if verbose:
+                    print(f"\n{'='*70}")
+                    print(f"RESUMING FROM: {resume_from}")
+                    print(f"Generation: {checkpoint['generation']}")
+                    print(f"{'='*70}\n")
+            else:
+                raise FileNotFoundError(f"Checkpoint not found: {resume_from}")
     
     # Create encoder
     encoder = HyperparameterEncoder(hp_space)
@@ -291,10 +374,47 @@ def run_optimization(
         surrogate_selector=selector,
         n_objectives=nsga_config.n_objectives
     )
-    
+
+    # Restore state from checkpoint if resuming
+    start_gen = 0
+    if checkpoint:
+        # Restore surrogate data
+        if checkpoint['surrogate_data'] and selector:
+            surrogate.X_train = checkpoint['surrogate_data']['X_train']
+            surrogate.y_train = checkpoint['surrogate_data']['y_train']
+            surrogate.n_train_samples = checkpoint['surrogate_data']['n_train_samples']
+            if verbose:
+                print(f"Restored surrogate with {surrogate.n_train_samples} training samples")
+
+        # Restore eval counts
+        problem.eval_count = checkpoint['eval_count']
+        problem.true_eval_count = checkpoint['true_eval_count']
+        problem.surrogate_eval_count = checkpoint['surrogate_eval_count']
+
+        start_gen = checkpoint['generation']
+
+    # Calculate remaining generations
+    remaining_gens = nsga_config.n_generations - start_gen
+    if remaining_gens <= 0:
+        if verbose:
+            print(f"Checkpoint already at or past target generations ({start_gen}/{nsga_config.n_generations})")
+            print(f"Loading final results from checkpoint...")
+        # Return results from checkpoint
+        pareto_configs = [encoder.decode(x) for x in checkpoint['population_X']]
+        F_pareto = checkpoint['population_F'].copy()
+        F_pareto[:, problem.maximize_mask] = -F_pareto[:, problem.maximize_mask]
+        return {
+            'pareto_X': checkpoint['population_X'],
+            'pareto_F': F_pareto,
+            'pareto_configs': pareto_configs,
+            'history': checkpoint['history'],
+            'n_true_evals': checkpoint['true_eval_count'],
+            'n_surrogate_evals': checkpoint['surrogate_eval_count']
+        }
+
     # Create NSGA-III
     ref_dirs = get_reference_directions("das-dennis", nsga_config.n_objectives, n_partitions=nsga_config.n_partitions)
-    
+
     algorithm = NSGA3(
         ref_dirs=ref_dirs,
         pop_size=nsga_config.pop_size,
@@ -303,23 +423,44 @@ def run_optimization(
         mutation=PM(prob=1.0/encoder.n_vars, eta=nsga_config.mutation_eta),
         eliminate_duplicates=True
     )
-    
+
     # Callback
     callback = OptimizationCallback(
         checkpoint_dir=os.path.join(output_dir, 'checkpoints'),
         checkpoint_freq=nsga_config.checkpoint_frequency,
         verbose=verbose
     )
-    
+
+    # Restore callback history if resuming
+    if checkpoint:
+        callback.history = checkpoint['history']
+
+    # Setup initial population from checkpoint
+    initial_pop = None
+    if checkpoint:
+        # Create population from checkpoint data
+        initial_pop = Population.new("X", checkpoint['population_X'])
+        initial_pop.set("F", checkpoint['population_F'])
+        if verbose:
+            print(f"Restored population of size {len(initial_pop)}")
+
     # Run
     if verbose:
-        print(f"Starting NSGA-III: pop_size={nsga_config.pop_size}, generations={nsga_config.n_generations}")
+        if checkpoint:
+            print(f"Resuming NSGA-III: Completed {start_gen}/{nsga_config.n_generations} generations")
+            print(f"Running {remaining_gens} more generations...")
+        else:
+            print(f"Starting NSGA-III: pop_size={nsga_config.pop_size}, generations={nsga_config.n_generations}")
         print(f"Reference directions: {len(ref_dirs)}")
-    
+
+    # Setup algorithm with initial population if resuming
+    if initial_pop:
+        algorithm.initialization.sampling = initial_pop
+
     result = minimize(
         problem,
         algorithm,
-        termination=get_termination("n_gen", nsga_config.n_generations),
+        termination=get_termination("n_gen", remaining_gens),
         seed=seed,
         callback=callback,
         verbose=False
