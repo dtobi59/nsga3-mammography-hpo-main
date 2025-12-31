@@ -155,6 +155,24 @@ def build_model(config: Dict[str, Any]) -> MammographyCNN:
     )
 
 
+def create_model(backbone='efficientnet_b0', num_classes=2, dropout_rate=0.5,
+                 unfreeze_strategy='last_block', fc_hidden_size=512,
+                 use_additional_fc=True) -> MammographyCNN:
+    """
+    Create a model with individual parameters (convenience function for testing).
+
+    For production use, prefer build_model() with a config dict.
+    """
+    return MammographyCNN(
+        backbone=backbone,
+        num_classes=num_classes,
+        unfreeze_strategy=unfreeze_strategy,
+        dropout_rate=dropout_rate,
+        fc_hidden_size=fc_hidden_size,
+        use_additional_fc=use_additional_fc
+    )
+
+
 def get_param_count(model: nn.Module) -> Tuple[int, int]:
     """Get (total, trainable) parameter counts for any model."""
     total = sum(p.numel() for p in model.parameters())
