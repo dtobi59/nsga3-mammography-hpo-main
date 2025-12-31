@@ -118,17 +118,23 @@ def main():
             print(f"    - {csv_path.name}")
         return 1
 
-    # Check for images (supports both layouts: images/ subfolder or root)
+    # Check for images (supports multiple layouts)
     images_dir = data_path / "images"
     if images_dir.exists():
         png_files = list(images_dir.glob("**/*.png"))
-        print(f"  [OK] Images in subfolder: {len(png_files)} PNG files")
+        print(f"  [OK] Images in 'images/' subfolder: {len(png_files)} PNG files")
         if len(png_files) == 0:
             print("  [!] Warning: No PNG files found in images directory")
     else:
-        png_files = list(data_path.glob("*.png"))
+        # Check for PNGs in subdirectories (organized by patient/study ID)
+        png_files = list(data_path.glob("**/*.png"))
+        direct_png = list(data_path.glob("*.png"))
+
         if len(png_files) > 0:
-            print(f"  [OK] Images in root directory: {len(png_files)} PNG files")
+            if len(direct_png) > 0:
+                print(f"  [OK] Images in root directory: {len(png_files)} PNG files")
+            else:
+                print(f"  [OK] Images in subdirectories: {len(png_files)} PNG files")
         else:
             print(f"  [X] No PNG files found in {data_path}")
             return 1

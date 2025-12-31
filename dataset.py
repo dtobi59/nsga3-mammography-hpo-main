@@ -472,20 +472,29 @@ class KaggleVinDrPNGDataset:
 
     Dataset: https://www.kaggle.com/datasets/shantanughosh/vindr-mammogram-dataset-dicom-to-png
 
-    Expected structure after download (supports both layouts):
+    Expected structure after download (supports multiple layouts):
 
     Option 1 (with images subfolder):
     data_root/
     ├── images/
     │   └── *.png (or organized in subfolders)
-    └── vindr_detection_v1_folds.csv (or breast-level_annotations.csv)
+    └── vindr_detection_v1_folds.csv
 
-    Option 2 (images in root):
+    Option 2 (images in root with subdirectories per patient/study):
     data_root/
-    ├── *.png (images directly in root)
-    └── vindr_detection_v1_folds.csv (or breast-level_annotations.csv)
+    ├── patient_id_1/
+    │   ├── image1.png
+    │   └── image2.png
+    ├── patient_id_2/
+    │   └── image3.png
+    └── vindr_detection_v1_folds.csv
 
-    The CSV should contain columns for image paths/IDs and labels (BI-RADS scores).
+    Option 3 (images directly in root):
+    data_root/
+    ├── *.png
+    └── vindr_detection_v1_folds.csv
+
+    The CSV should contain columns for image IDs, patient/study IDs, and labels (BI-RADS).
     The class automatically detects which structure is being used.
     """
 
@@ -597,13 +606,14 @@ class KaggleVinDrPNGDataset:
         # Try different path patterns
         path_candidates = []
 
-        # Pattern 1: Direct image_id.png
+        # Pattern 1: Direct image_id.png in images_dir
         path_candidates.append(self.images_dir / f"{image_id}.png")
 
-        # Pattern 2: With subdirectory (study_id/image_id.png)
-        if 'study_id' in row:
-            study_id = str(row['study_id']).strip()
-            path_candidates.append(self.images_dir / study_id / f"{image_id}.png")
+        # Pattern 2: With subdirectory (study_id/image_id.png or patient_id/image_id.png)
+        for col in ['study_id', 'patient_id', 'StudyInstanceUID', 'PatientID']:
+            if col in row:
+                subdir = str(row[col]).strip()
+                path_candidates.append(self.images_dir / subdir / f"{image_id}.png")
 
         # Pattern 3: Already a path in the CSV
         path_candidates.append(self.data_root / image_id)
@@ -616,6 +626,12 @@ class KaggleVinDrPNGDataset:
         for path in path_candidates:
             if path.exists():
                 return str(path)
+
+        # Pattern 5: Recursive search as fallback (slower but more robust)
+        # Search for image_id.png anywhere in images_dir subdirectories
+        search_results = list(self.images_dir.glob(f"**/{image_id}.png"))
+        if search_results:
+            return str(search_results[0])
 
         return None
 
