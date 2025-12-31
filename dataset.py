@@ -472,13 +472,21 @@ class KaggleVinDrPNGDataset:
 
     Dataset: https://www.kaggle.com/datasets/shantanughosh/vindr-mammogram-dataset-dicom-to-png
 
-    Expected structure after download:
+    Expected structure after download (supports both layouts):
+
+    Option 1 (with images subfolder):
     data_root/
     ├── images/
     │   └── *.png (or organized in subfolders)
     └── vindr_detection_v1_folds.csv (or breast-level_annotations.csv)
 
+    Option 2 (images in root):
+    data_root/
+    ├── *.png (images directly in root)
+    └── vindr_detection_v1_folds.csv (or breast-level_annotations.csv)
+
     The CSV should contain columns for image paths/IDs and labels (BI-RADS scores).
+    The class automatically detects which structure is being used.
     """
 
     def __init__(self, data_root: str, csv_file: str = None):

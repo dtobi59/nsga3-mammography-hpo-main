@@ -118,17 +118,20 @@ def main():
             print(f"    - {csv_path.name}")
         return 1
 
-    # Check for images
+    # Check for images (supports both layouts: images/ subfolder or root)
     images_dir = data_path / "images"
     if images_dir.exists():
         png_files = list(images_dir.glob("**/*.png"))
-        print(f"  [OK] Images directory found: {len(png_files)} PNG files")
+        print(f"  [OK] Images in subfolder: {len(png_files)} PNG files")
         if len(png_files) == 0:
             print("  [!] Warning: No PNG files found in images directory")
     else:
-        print(f"  [!] Images directory not found at: {images_dir}")
-        png_files = list(data_path.glob("**/*.png"))
-        print(f"  Found {len(png_files)} PNG files in root")
+        png_files = list(data_path.glob("*.png"))
+        if len(png_files) > 0:
+            print(f"  [OK] Images in root directory: {len(png_files)} PNG files")
+        else:
+            print(f"  [X] No PNG files found in {data_path}")
+            return 1
 
     # ============================================================================
     # TEST 4: Load Dataset Class
